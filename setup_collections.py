@@ -1,0 +1,209 @@
+"""
+PocketBase 콜렉션 자동 생성 스크립트
+Usage: python setup_collections.py
+"""
+
+import json
+import sys
+import urllib.request
+import urllib.error
+
+PB_URL = "http://127.0.0.1:8090"
+ADMIN_EMAIL = "jr@vector9.app"
+ADMIN_PASSWORD = "abcd1234567"
+
+
+def api(method: str, path: str, body: dict | None = None, token: str = "") -> dict:
+    url = f"{PB_URL}{path}"
+    data = json.dumps(body).encode() if body else None
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = token
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode()
+        print(f"  ERROR {e.code}: {err_body}")
+        raise
+
+
+def main():
+    # 1. Admin 인증
+    print("=== PocketBase 콜렉션 설정 ===\n")
+    print("[1/7] Admin 인증...")
+    auth = api("POST", "/api/admins/auth-with-password", {
+        "identity": ADMIN_EMAIL,
+        "password": ADMIN_PASSWORD,
+    })
+    token = auth["token"]
+    print("  OK\n")
+
+    # 2. users 콜렉션 확장 (기존 auth 콜렉션에 필드 추가)
+    print("[2/7] users 콜렉션 필드 확장...")
+    users_fields = [
+        {"name": "name", "type": "text"},
+        {"name": "role", "type": "select", "options": {"values": ["ADMIN", "USER"], "maxSelect": 1}},
+        {"name": "primaryApiKey", "type": "text"},
+        {"name": "dailyUsage", "type": "number", "options": {"min": 0}},
+        {"name": "dailyQuota", "type": "number", "options": {"min": 0}},
+        {"name": "totalUsage", "type": "number", "options": {"min": 0}},
+        {"name": "totalQuota", "type": "number", "options": {"min": 0}},
+        {"name": "lastActive", "type": "date"},
+        {"name": "lastIp", "type": "text"},
+        {"name": "status", "type": "select", "options": {"values": ["active", "blocked"], "maxSelect": 1}},
+        {"name": "accessCount", "type": "number", "options": {"min": 0}},
+    ]
+    try:
+        api("PATCH", "/api/collections/_pb_users_auth_", {
+            "schema": users_fields,
+            "listRule": "",
+            "viewRule": "",
+            "createRule": "",
+            "updateRule": "@request.auth.id != ''",
+            "deleteRule": None,
+        }, token)
+        print("  OK\n")
+    except Exception as e:
+        print(f"  Warning: {e}\n")
+
+    # 3. api_keys 콜렉션
+    print("[3/7] api_keys 콜렉션 생성...")
+    try:
+        api("POST", "/api/collections", {
+            "name": "api_keys",
+            "type": "base",
+            "schema": [
+                {"name": "user", "type": "relation", "options": {"collectionId": "_pb_users_auth_", "maxSelect": 1}},
+                {"name": "name", "type": "text"},
+                {"name": "keyHash", "type": "text"},
+                {"name": "keyPrefix", "type": "text"},
+                {"name": "dailyRequests", "type": "number", "options": {"min": 0}},
+                {"name": "dailyTokens", "type": "number", "options": {"min": 0}},
+                {"name": "totalTokens", "type": "number", "options": {"min": 0}},
+                {"name": "usedRequests", "type": "number", "options": {"min": 0}},
+                {"name": "usedTokens", "type": "number", "options": {"min": 0}},
+                {"name": "totalUsedTokens", "type": "number", "options": {"min": 0}},
+                {"name": "lastResetDate", "type": "date"},
+                {"name": "isActive", "type": "bool"},
+            ],
+            "listRule": "",
+            "viewRule": "",
+            "createRule": "",
+            "updateRule": "",
+            "deleteRule": "",
+        }, token)
+        print("  OK\n")
+    except Exception as e:
+        print(f"  Warning: {e}\n")
+
+    # 4. security_events 콜렉션
+    print("[4/7] security_events 콜렉션 생성...")
+    try:
+        api("POST", "/api/collections", {
+            "name": "security_events",
+            "type": "base",
+            "schema": [
+                {"name": "type", "type": "select", "options": {"values": ["failed_login", "unusual_traffic", "brute_force", "ddos_attempt"], "maxSelect": 1}},
+                {"name": "severity", "type": "select", "options": {"values": ["low", "medium", "high", "critical"], "maxSelect": 1}},
+                {"name": "description", "type": "text"},
+                {"name": "ip", "type": "text"},
+                {"name": "userId", "type": "relation", "options": {"collectionId": "_pb_users_auth_", "maxSelect": 1}},
+            ],
+            "listRule": "",
+            "viewRule": "",
+            "createRule": "",
+            "updateRule": "",
+            "deleteRule": "",
+        }, token)
+        print("  OK\n")
+    except Exception as e:
+        print(f"  Warning: {e}\n")
+
+    # 5. api_applications 콜렉션
+    print("[5/7] api_applications 콜렉션 생성...")
+    try:
+        api("POST", "/api/collections", {
+            "name": "api_applications",
+            "type": "base",
+            "schema": [
+                {"name": "user", "type": "relation", "options": {"collectionId": "_pb_users_auth_", "maxSelect": 1}},
+                {"name": "userName", "type": "text"},
+                {"name": "projectName", "type": "text"},
+                {"name": "useCase", "type": "text"},
+                {"name": "requestedQuota", "type": "number", "options": {"min": 0}},
+                {"name": "targetModel", "type": "text"},
+                {"name": "status", "type": "select", "options": {"values": ["pending", "approved", "rejected"], "maxSelect": 1}},
+                {"name": "adminNote", "type": "text"},
+            ],
+            "listRule": "",
+            "viewRule": "",
+            "createRule": "",
+            "updateRule": "",
+            "deleteRule": "",
+        }, token)
+        print("  OK\n")
+    except Exception as e:
+        print(f"  Warning: {e}\n")
+
+    # 6. usage_logs 콜렉션
+    print("[6/7] usage_logs 콜렉션 생성...")
+    try:
+        api("POST", "/api/collections", {
+            "name": "usage_logs",
+            "type": "base",
+            "schema": [
+                {"name": "user", "type": "relation", "options": {"collectionId": "_pb_users_auth_", "maxSelect": 1}},
+                {"name": "apiKey", "type": "relation", "options": {"collectionId": "api_keys", "maxSelect": 1}},
+                {"name": "model", "type": "text"},
+                {"name": "endpoint", "type": "text"},
+                {"name": "promptTokens", "type": "number", "options": {"min": 0}},
+                {"name": "completionTokens", "type": "number", "options": {"min": 0}},
+                {"name": "totalTokens", "type": "number", "options": {"min": 0}},
+                {"name": "responseTimeMs", "type": "number", "options": {"min": 0}},
+                {"name": "statusCode", "type": "number"},
+                {"name": "ip", "type": "text"},
+                {"name": "isError", "type": "bool"},
+            ],
+            "listRule": "",
+            "viewRule": "",
+            "createRule": "",
+            "updateRule": "",
+            "deleteRule": "",
+        }, token)
+        print("  OK\n")
+    except Exception as e:
+        print(f"  Warning: {e}\n")
+
+    # 7. user_settings 콜렉션
+    print("[7/7] user_settings 콜렉션 생성...")
+    try:
+        api("POST", "/api/collections", {
+            "name": "user_settings",
+            "type": "base",
+            "schema": [
+                {"name": "user", "type": "relation", "options": {"collectionId": "_pb_users_auth_", "maxSelect": 1}},
+                {"name": "autoModelUpdate", "type": "bool"},
+                {"name": "detailedLogging", "type": "bool"},
+                {"name": "ipWhitelist", "type": "text"},
+                {"name": "emailSecurityAlerts", "type": "bool"},
+                {"name": "usageThresholdAlert", "type": "bool"},
+            ],
+            "listRule": "",
+            "viewRule": "",
+            "createRule": "",
+            "updateRule": "",
+            "deleteRule": "",
+        }, token)
+        print("  OK\n")
+    except Exception as e:
+        print(f"  Warning: {e}\n")
+
+    print("=== 완료! ===")
+    print("모든 콜렉션이 생성되었습니다.")
+    print(f"PocketBase Admin UI: {PB_URL}/_/")
+
+
+if __name__ == "__main__":
+    main()
