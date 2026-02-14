@@ -183,7 +183,7 @@ def main():
         print(f"  Warning: {e}\n")
 
     # 7. user_settings 콜렉션
-    print("[7/7] user_settings 콜렉션 생성...")
+    print("[7/8] user_settings 콜렉션 생성...")
     try:
         api("POST", "/api/collections", {
             "name": "user_settings",
@@ -201,6 +201,30 @@ def main():
             "createRule": "",
             "updateRule": "",
             "deleteRule": "",
+        }, token)
+        print("  OK\n")
+    except Exception as e:
+        print(f"  Warning: {e}\n")
+
+    # 8. system_settings 콜렉션 (관리자 전용 시스템 설정)
+    print("[8/8] system_settings 콜렉션 생성...")
+    try:
+        api("POST", "/api/collections", {
+            "name": "system_settings",
+            "type": "base",
+            "schema": [
+                {"name": "key", "type": "text", "options": {"max": 100}},
+                {"name": "value", "type": "text"},
+                {"name": "description", "type": "text"},
+            ],
+            "listRule": "",
+            "viewRule": "",
+            "createRule": "",
+            "updateRule": "",
+            "deleteRule": "",
+            "indexes": [
+                "CREATE UNIQUE INDEX idx_system_settings_key ON system_settings (key)"
+            ],
         }, token)
         print("  OK\n")
     except Exception as e:

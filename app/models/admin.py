@@ -31,3 +31,11 @@ class ModelPerformanceResponse(BaseModel):
 
 class InsightsRequest(BaseModel):
     stats: dict
+
+
+class OllamaSettingsResponse(BaseModel):
+    ollamaBaseUrl: str
+
+
+class OllamaSettingsUpdateRequest(BaseModel):
+    ollamaBaseUrl: str

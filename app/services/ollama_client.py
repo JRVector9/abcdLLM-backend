@@ -5,11 +5,40 @@ from app.config import settings
 _client: httpx.AsyncClient | None = None
 
 
+def _get_ollama_base_url() -> str:
+    """DB에서 Ollama URL을 가져옵니다. 없으면 config 기본값 사용"""
+    try:
+        from app.database import pb
+        results = pb.collection("system_settings").get_list(1, 1, {"filter": 'key="ollama_base_url"'})
+        if results.items:
+            return getattr(results.items[0], "value", settings.OLLAMA_BASE_URL)
+    except Exception:
+        pass
+    return settings.OLLAMA_BASE_URL
+
+
 def get_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(base_url=settings.OLLAMA_BASE_URL, timeout=120.0)
+        base_url = _get_ollama_base_url()
+        _client = httpx.AsyncClient(base_url=base_url, timeout=120.0)
     return _client
+
+
+def reset_client() -> None:
+    """클라이언트를 재설정합니다 (URL 변경 시 사용)"""
+    global _client
+    if _client is not None and not _client.is_closed:
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(_client.aclose())
+            else:
+                asyncio.run(_client.aclose())
+        except Exception:
+            pass
+    _client = None
 
 
 async def chat(payload: dict) -> dict:

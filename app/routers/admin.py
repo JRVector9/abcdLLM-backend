@@ -4,8 +4,9 @@ from app.database import pb
 from app.dependencies import require_admin, _record_to_dict
 from app.models.user import UserUpdateRequest
 from app.models.application import ApplicationUpdateRequest
-from app.models.admin import InsightsRequest
+from app.models.admin import InsightsRequest, OllamaSettingsResponse, OllamaSettingsUpdateRequest
 from app.services import metrics_service, security_service, ollama_client
+from app.config import settings
 
 router = APIRouter()
 
@@ -186,3 +187,51 @@ async def update_application(
     pb.collection("api_applications").update(app_id, update_data)
     updated = pb.collection("api_applications").get_one(app_id)
     return _app_record_to_dict(updated)
+
+
+def _get_system_setting(key: str, default: str = "") -> str:
+    """시스템 설정 값을 가져옵니다."""
+    try:
+        results = pb.collection("system_settings").get_list(1, 1, {"filter": f'key="{key}"'})
+        if results.items:
+            return getattr(results.items[0], "value", default)
+    except Exception:
+        pass
+    return default
+
+
+def _set_system_setting(key: str, value: str, description: str = "") -> None:
+    """시스템 설정 값을 저장합니다."""
+    try:
+        # 기존 설정이 있는지 확인
+        results = pb.collection("system_settings").get_list(1, 1, {"filter": f'key="{key}"'})
+        if results.items:
+            # 업데이트
+            pb.collection("system_settings").update(results.items[0].id, {"value": value})
+        else:
+            # 새로 생성
+            pb.collection("system_settings").create({
+                "key": key,
+                "value": value,
+                "description": description,
+            })
+    except Exception:
+        pass
+
+
+@router.get("/ollama-settings")
+async def get_ollama_settings(admin: dict = Depends(require_admin)):
+    """관리자용 Ollama 설정 조회"""
+    ollama_url = _get_system_setting("ollama_base_url", settings.OLLAMA_BASE_URL)
+    return OllamaSettingsResponse(ollamaBaseUrl=ollama_url)
+
+
+@router.patch("/ollama-settings")
+async def update_ollama_settings(
+    body: OllamaSettingsUpdateRequest, admin: dict = Depends(require_admin)
+):
+    """관리자용 Ollama URL 업데이트"""
+    _set_system_setting("ollama_base_url", body.ollamaBaseUrl, "Ollama 서버 베이스 URL")
+    # 클라이언트 재생성을 위해 기존 클라이언트 닫기
+    ollama_client.reset_client()
+    return OllamaSettingsResponse(ollamaBaseUrl=body.ollamaBaseUrl)
