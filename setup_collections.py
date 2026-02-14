@@ -4,24 +4,30 @@ Usage: python setup_collections.py
 """
 
 import json
+import os
 import sys
 import urllib.request
 import urllib.error
+import ssl
 
-PB_URL = "http://127.0.0.1:8090"
-ADMIN_EMAIL = "jr@vector9.app"
-ADMIN_PASSWORD = "abcd1234567"
+PB_URL = os.environ.get("PB_URL", "https://abcdllm-db.jrai.space")
+ADMIN_EMAIL = os.environ.get("PB_ADMIN_EMAIL", "jr@vector9.app")
+ADMIN_PASSWORD = os.environ.get("PB_ADMIN_PASSWORD", "abcd1234567")
 
 
 def api(method: str, path: str, body: dict | None = None, token: str = "") -> dict:
     url = f"{PB_URL}{path}"
     data = json.dumps(body).encode() if body else None
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    }
     if token:
         headers["Authorization"] = token
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    ctx = ssl.create_default_context()
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, context=ctx) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         err_body = e.read().decode()
