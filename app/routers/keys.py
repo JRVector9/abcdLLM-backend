@@ -19,15 +19,17 @@ def _key_to_response(record, plain_key: str | None = None) -> dict:
     created = record.created
     if hasattr(created, "isoformat"):
         created = created.isoformat()
-    stored_key = getattr(record, "keyPlain", None) or ""
+    # SDK converts camelCase → snake_case (keyPlain → key_plain)
+    stored_key = getattr(record, "key_plain", None) or ""
+    prefix = getattr(record, "key_prefix", "") or ""
     return {
         "id": record.id,
         "name": getattr(record, "name", ""),
-        "key": plain_key or stored_key or (getattr(record, "keyPrefix", "") + "..."),
+        "key": plain_key or stored_key or (prefix + "..."),
         "createdAt": str(created),
-        "dailyRequests": getattr(record, "dailyRequests", 0) or 0,
-        "dailyTokens": getattr(record, "dailyTokens", 0) or 0,
-        "totalTokens": getattr(record, "totalTokens", 0) or 0,
+        "dailyRequests": getattr(record, "daily_requests", 0) or 0,
+        "dailyTokens": getattr(record, "daily_tokens", 0) or 0,
+        "totalTokens": getattr(record, "total_tokens", 0) or 0,
     }
 
 
