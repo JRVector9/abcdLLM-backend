@@ -26,6 +26,13 @@ async def list_models() -> dict:
     return resp.json()
 
 
+async def generate(payload: dict) -> dict:
+    client = get_client()
+    resp = await client.post("/api/generate", json=payload)
+    resp.raise_for_status()
+    return resp.json()
+
+
 async def show_model(name: str) -> dict:
     client = get_client()
     resp = await client.post("/api/show", json={"name": name})

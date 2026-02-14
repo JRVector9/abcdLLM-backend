@@ -12,6 +12,7 @@ from app.database import pb
 
 router = APIRouter()
 openai_router = APIRouter()
+ollama_native_router = APIRouter()
 
 
 def _format_bytes(n: int) -> str:
@@ -212,3 +213,76 @@ async def openai_list_models(user: dict = Depends(get_api_key_user)):
             "owned_by": "ollama",
         })
     return {"object": "list", "data": models}
+
+
+# ── Ollama Native Endpoints (for n8n Ollama node) ──
+
+
+@ollama_native_router.get("/tags")
+async def ollama_tags(user: dict = Depends(get_api_key_user)):
+    """Ollama-native /api/tags endpoint for n8n compatibility."""
+    try:
+        data = await ollama_client.list_models()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Cannot reach Ollama")
+    return data
+
+
+@ollama_native_router.post("/chat")
+async def ollama_native_chat(body: ChatRequest, request: Request, user: dict = Depends(get_api_key_user)):
+    """Ollama-native /api/chat endpoint for n8n compatibility."""
+    reset_daily_if_needed(user["id"])
+
+    payload = {
+        "model": body.model,
+        "messages": [m.model_dump() for m in body.messages],
+        "stream": False,
+    }
+    if body.options:
+        payload["options"] = body.options
+
+    start = time.time()
+    try:
+        result = await ollama_client.chat(payload)
+    except Exception as e:
+        _log_usage(user, body.model, "/api/chat", 0, 0, time.time() - start, 502, request, True)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ollama error: {e}")
+
+    prompt_tokens = result.get("prompt_eval_count", 0) or 0
+    completion_tokens = result.get("eval_count", 0) or 0
+    total_tokens = prompt_tokens + completion_tokens
+    elapsed = time.time() - start
+
+    try:
+        check_and_deduct(user, total_tokens, user.get("_api_key_id"))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
+
+    _log_usage(user, body.model, "/api/chat", prompt_tokens, completion_tokens, elapsed, 200, request, False)
+
+    return result
+
+
+@ollama_native_router.post("/generate")
+async def ollama_native_generate(request: Request, user: dict = Depends(get_api_key_user)):
+    """Ollama-native /api/generate endpoint."""
+    body = await request.json()
+    start = time.time()
+    try:
+        result = await ollama_client.generate(body)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ollama error: {e}")
+
+    prompt_tokens = result.get("prompt_eval_count", 0) or 0
+    completion_tokens = result.get("eval_count", 0) or 0
+    total_tokens = prompt_tokens + completion_tokens
+    elapsed = time.time() - start
+
+    try:
+        check_and_deduct(user, total_tokens, user.get("_api_key_id"))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
+
+    _log_usage(user, body.get("model", ""), "/api/generate", prompt_tokens, completion_tokens, elapsed, 200, request, False)
+
+    return result
