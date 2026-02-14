@@ -19,14 +19,15 @@ def _key_to_response(record, plain_key: str | None = None) -> dict:
     created = record.created
     if hasattr(created, "isoformat"):
         created = created.isoformat()
+    stored_key = getattr(record, "keyPlain", None) or ""
     return {
         "id": record.id,
         "name": getattr(record, "name", ""),
-        "key": plain_key or (getattr(record, "key_prefix", "") + "..."),
+        "key": plain_key or stored_key or (getattr(record, "keyPrefix", "") + "..."),
         "createdAt": str(created),
-        "dailyRequests": getattr(record, "daily_requests", 0) or 0,
-        "dailyTokens": getattr(record, "daily_tokens", 0) or 0,
-        "totalTokens": getattr(record, "total_tokens", 0) or 0,
+        "dailyRequests": getattr(record, "dailyRequests", 0) or 0,
+        "dailyTokens": getattr(record, "dailyTokens", 0) or 0,
+        "totalTokens": getattr(record, "totalTokens", 0) or 0,
     }
 
 
@@ -46,6 +47,7 @@ async def create_key(body: ApiKeyCreateRequest, user: dict = Depends(get_current
         "name": body.name,
         "keyHash": key_hash,
         "keyPrefix": plain_key[:12],
+        "keyPlain": plain_key,
         "dailyRequests": body.dailyRequests,
         "dailyTokens": body.dailyTokens,
         "totalTokens": body.totalTokens,
@@ -85,6 +87,7 @@ async def regenerate_key(key_id: str, user: dict = Depends(get_current_user)):
     pb.collection("api_keys").update(key_id, {
         "keyHash": key_hash,
         "keyPrefix": plain_key[:12],
+        "keyPlain": plain_key,
     })
     updated = pb.collection("api_keys").get_one(key_id)
     return _key_to_response(updated, plain_key)
