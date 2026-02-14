@@ -1,4 +1,5 @@
 import time
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -10,6 +11,7 @@ from app.services.quota_service import check_and_deduct, reset_daily_if_needed
 from app.database import pb
 
 router = APIRouter()
+openai_router = APIRouter()
 
 
 def _format_bytes(n: int) -> str:
@@ -131,3 +133,82 @@ def _log_usage(
         })
     except Exception:
         pass
+
+
+# ── OpenAI Compatible Endpoints ──
+
+
+@openai_router.post("/chat/completions")
+async def openai_chat_completions(body: ChatRequest, request: Request, user: dict = Depends(get_api_key_user)):
+    """OpenAI-compatible chat completions endpoint."""
+    reset_daily_if_needed(user["id"])
+
+    payload = {
+        "model": body.model,
+        "messages": [m.model_dump() for m in body.messages],
+        "stream": False,
+    }
+    if body.options:
+        payload["options"] = body.options
+
+    start = time.time()
+    try:
+        result = await ollama_client.chat(payload)
+    except Exception as e:
+        _log_usage(user, body.model, "/v1/chat/completions", 0, 0, time.time() - start, 502, request, True)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ollama error: {e}")
+
+    prompt_tokens = result.get("prompt_eval_count", 0) or 0
+    completion_tokens = result.get("eval_count", 0) or 0
+    total_tokens = prompt_tokens + completion_tokens
+    elapsed = time.time() - start
+
+    try:
+        check_and_deduct(user, total_tokens, user.get("_api_key_id"))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
+
+    _log_usage(user, body.model, "/v1/chat/completions", prompt_tokens, completion_tokens, elapsed, 200, request, False)
+
+    # Return OpenAI-compatible response format
+    msg = result.get("message", {})
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": body.model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": msg.get("role", "assistant"),
+                    "content": msg.get("content", ""),
+                },
+                "finish_reason": result.get("done_reason", "stop"),
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        },
+    }
+
+
+@openai_router.get("/models")
+async def openai_list_models(user: dict = Depends(get_api_key_user)):
+    """OpenAI-compatible models list endpoint."""
+    try:
+        data = await ollama_client.list_models()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Cannot reach Ollama")
+
+    models = []
+    for m in data.get("models", []):
+        models.append({
+            "id": m.get("name", ""),
+            "object": "model",
+            "created": int(time.time()),
+            "owned_by": "ollama",
+        })
+    return {"object": "list", "data": models}
