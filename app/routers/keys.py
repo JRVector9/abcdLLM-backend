@@ -74,6 +74,25 @@ async def delete_key(key_id: str, user: dict = Depends(get_current_user)):
     return {"ok": True}
 
 
+@router.get("/{key_id}/reveal")
+async def reveal_key(key_id: str, user: dict = Depends(get_current_user)):
+    try:
+        record = pb.collection("api_keys").get_one(key_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key not found")
+    if record.user != user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your key")
+
+    # Return the full key from storage
+    stored_key = getattr(record, "key_plain", None) or ""
+    if not stored_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Full key not available (created before keyPlain storage)"
+        )
+    return {"key": stored_key}
+
+
 @router.post("/{key_id}/regenerate")
 async def regenerate_key(key_id: str, user: dict = Depends(get_current_user)):
     try:
