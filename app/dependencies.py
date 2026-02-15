@@ -53,7 +53,8 @@ async def get_api_key_user(
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
             key_record = results.items[0]
             user_record = pb.collection("users").get_one(key_record.user)
-            if user_record.status == "blocked":
+            user_status = getattr(user_record, "status", "active")
+            if user_status == "blocked":
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account blocked")
             return {**_record_to_dict(user_record), "_api_key_id": key_record.id}
         except HTTPException:
