@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -7,7 +9,20 @@ from app.middleware.error_handler import register_error_handlers
 from app.middleware.request_logger import RequestLoggerMiddleware
 from app.middleware.rate_limiter import setup_rate_limiter
 
-app = FastAPI(title="abcdLLM API", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """애플리케이션 시작 및 종료 시 실행되는 로직"""
+    # Startup: Ollama 자동 감지 및 구성
+    from app.services.ollama_detector import auto_configure_ollama
+    await auto_configure_ollama()
+
+    yield
+
+    # Shutdown: 필요한 경우 정리 작업
+
+
+app = FastAPI(title="abcdLLM API", version="1.0.0", lifespan=lifespan)
 
 # CORS
 app.add_middleware(
