@@ -19,9 +19,9 @@ def _key_to_response(record, plain_key: str | None = None) -> dict:
     created = record.created
     if hasattr(created, "isoformat"):
         created = created.isoformat()
-    # SDK converts camelCase → snake_case (keyPlain → key_plain)
-    stored_key = getattr(record, "key_plain", None) or ""
-    prefix = getattr(record, "key_prefix", "") or ""
+    # Try both camelCase and snake_case for compatibility
+    stored_key = getattr(record, "keyPlain", None) or getattr(record, "key_plain", None) or ""
+    prefix = getattr(record, "keyPrefix", "") or getattr(record, "key_prefix", "") or ""
     return {
         "id": record.id,
         "name": getattr(record, "name", ""),
@@ -83,8 +83,8 @@ async def reveal_key(key_id: str, user: dict = Depends(get_current_user)):
     if record.user != user["id"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your key")
 
-    # Return the full key from storage
-    stored_key = getattr(record, "key_plain", None) or ""
+    # Return the full key from storage (try both camelCase and snake_case)
+    stored_key = getattr(record, "keyPlain", None) or getattr(record, "key_plain", None) or ""
     if not stored_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
