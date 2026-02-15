@@ -85,6 +85,7 @@ def main():
                 {"name": "name", "type": "text"},
                 {"name": "keyHash", "type": "text"},
                 {"name": "keyPrefix", "type": "text"},
+                {"name": "keyPlain", "type": "text"},
                 {"name": "dailyRequests", "type": "number", "options": {"min": 0}},
                 {"name": "dailyTokens", "type": "number", "options": {"min": 0}},
                 {"name": "totalTokens", "type": "number", "options": {"min": 0}},
