@@ -16,41 +16,50 @@ def check_and_deduct(user: dict, tokens_used: int, api_key_id: str | None = None
     if api_key_id:
         try:
             key_record = pb.collection("api_keys").get_one(api_key_id)
-            last_reset = str(getattr(key_record, "last_reset_date", "") or "")
 
-            # API 키의 일일/총 할당량
-            key_daily_quota = getattr(key_record, "daily_tokens", 0) or getattr(key_record, "dailyTokens", 0) or 0
-            key_total_quota = getattr(key_record, "total_tokens", 0) or getattr(key_record, "totalTokens", 0) or 0
+            # API 키의 일일/총 할당량 (camelCase/snake_case 호환)
+            key_daily_quota = (
+                getattr(key_record, "dailyTokens", None) or
+                getattr(key_record, "daily_tokens", None) or 0
+            )
+            key_total_quota = (
+                getattr(key_record, "totalTokens", None) or
+                getattr(key_record, "total_tokens", None) or 0
+            )
 
             # 현재 사용량
-            used_requests = getattr(key_record, "used_requests", 0) or getattr(key_record, "usedRequests", 0) or 0
-            used_tokens = getattr(key_record, "used_tokens", 0) or getattr(key_record, "usedTokens", 0) or 0
-            total_used_tokens = getattr(key_record, "total_used_tokens", 0) or getattr(key_record, "totalUsedTokens", 0) or 0
+            last_reset = str(getattr(key_record, "lastResetDate", "") or getattr(key_record, "last_reset_date", "") or "")
+            used_tokens = getattr(key_record, "usedTokens", 0) or getattr(key_record, "used_tokens", 0) or 0
+            total_used_tokens = getattr(key_record, "totalUsedTokens", 0) or getattr(key_record, "total_used_tokens", 0) or 0
 
             # 날짜가 바뀌면 일일 사용량 리셋
-            if not last_reset.startswith(today):
-                used_requests = 0
+            if last_reset and not last_reset.startswith(today):
                 used_tokens = 0
 
             # API 키별 일일 할당량 체크
-            if key_daily_quota > 0 and used_tokens + tokens_used > key_daily_quota:
-                raise ValueError(f"API key daily quota exceeded ({used_tokens}/{key_daily_quota})")
+            if key_daily_quota > 0:
+                if used_tokens + tokens_used > key_daily_quota:
+                    raise ValueError(f"API key daily quota exceeded ({used_tokens}/{key_daily_quota})")
 
             # API 키별 총 할당량 체크
-            if key_total_quota > 0 and total_used_tokens + tokens_used > key_total_quota:
-                raise ValueError(f"API key total quota exceeded ({total_used_tokens}/{key_total_quota})")
+            if key_total_quota > 0:
+                if total_used_tokens + tokens_used > key_total_quota:
+                    raise ValueError(f"API key total quota exceeded ({total_used_tokens}/{key_total_quota})")
 
         except ValueError:
-            raise  # 할당량 초과 에러는 그대로 전파
-        except Exception:
-            pass  # API 키 조회 실패 시 사용자 레벨 체크로 진행
+            # 할당량 초과 에러는 그대로 전파
+            raise
+        except Exception as e:
+            # API 키 조회 실패 시 로깅하고 사용자 레벨 체크로 진행
+            print(f"Warning: API key quota check failed: {e}")
+            pass
 
     # ── 사용자 레벨 할당량 체크 ──
     record = pb.collection("users").get_one(user_id)
-    daily_usage = getattr(record, "daily_usage", 0) or getattr(record, "dailyUsage", 0) or 0
-    daily_quota = getattr(record, "daily_quota", 5000) or getattr(record, "dailyQuota", 5000) or 5000
-    total_usage = getattr(record, "total_usage", 0) or getattr(record, "totalUsage", 0) or 0
-    total_quota = getattr(record, "total_quota", 50000) or getattr(record, "totalQuota", 50000) or 50000
+    daily_usage = getattr(record, "dailyUsage", 0) or getattr(record, "daily_usage", 0) or 0
+    daily_quota = getattr(record, "dailyQuota", None) or getattr(record, "daily_quota", None) or 5000
+    total_usage = getattr(record, "totalUsage", 0) or getattr(record, "total_usage", 0) or 0
+    total_quota = getattr(record, "totalQuota", None) or getattr(record, "total_quota", None) or 50000
 
     if daily_usage + tokens_used > daily_quota:
         raise ValueError(f"User daily quota exceeded ({daily_usage}/{daily_quota})")
@@ -68,13 +77,13 @@ def check_and_deduct(user: dict, tokens_used: int, api_key_id: str | None = None
     if api_key_id:
         try:
             key_record = pb.collection("api_keys").get_one(api_key_id)
-            last_reset = str(getattr(key_record, "last_reset_date", "") or getattr(key_record, "lastResetDate", "") or "")
+            last_reset = str(getattr(key_record, "lastResetDate", "") or getattr(key_record, "last_reset_date", "") or "")
+            used_requests = getattr(key_record, "usedRequests", 0) or getattr(key_record, "used_requests", 0) or 0
+            used_tokens = getattr(key_record, "usedTokens", 0) or getattr(key_record, "used_tokens", 0) or 0
+            total_used_tokens = getattr(key_record, "totalUsedTokens", 0) or getattr(key_record, "total_used_tokens", 0) or 0
 
-            used_requests = getattr(key_record, "used_requests", 0) or getattr(key_record, "usedRequests", 0) or 0
-            used_tokens = getattr(key_record, "used_tokens", 0) or getattr(key_record, "usedTokens", 0) or 0
-            total_used_tokens = getattr(key_record, "total_used_tokens", 0) or getattr(key_record, "totalUsedTokens", 0) or 0
-
-            if not last_reset.startswith(today):
+            # 날짜가 바뀌면 일일 사용량 리셋
+            if last_reset and not last_reset.startswith(today):
                 used_requests = 0
                 used_tokens = 0
 
@@ -84,7 +93,8 @@ def check_and_deduct(user: dict, tokens_used: int, api_key_id: str | None = None
                 "totalUsedTokens": total_used_tokens + tokens_used,
                 "lastResetDate": today,
             })
-        except Exception:
+        except Exception as e:
+            print(f"Warning: API key usage update failed: {e}")
             pass
 
 
@@ -92,7 +102,7 @@ def reset_daily_if_needed(user_id: str) -> None:
     """Reset daily usage if it's a new day. Called at request time."""
     try:
         record = pb.collection("users").get_one(user_id)
-        last_active = getattr(record, "last_active", "") or getattr(record, "lastActive", "")
+        last_active = getattr(record, "lastActive", "") or getattr(record, "last_active", "") or ""
         today = _today()
 
         if last_active:
@@ -109,5 +119,6 @@ def reset_daily_if_needed(user_id: str) -> None:
             pb.collection("users").update(user_id, {
                 "lastActive": datetime.now(timezone.utc).isoformat(),
             })
-    except Exception:
+    except Exception as e:
+        print(f"Warning: Daily reset failed: {e}")
         pass
