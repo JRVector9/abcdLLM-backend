@@ -4,6 +4,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     POCKETBASE_URL: str = "http://127.0.0.1:8090"
     OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
+    DEFAULT_MODEL: str = "qwen3:8b"
+    OLLAMA_KEEP_ALIVE: str = "30m"
 
     JWT_SECRET: str = "change-me"
     JWT_ALGORITHM: str = "HS256"

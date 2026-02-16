@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from app.config import settings
 from app.dependencies import get_api_key_user
 from app.models.ollama import ChatRequest, ModelShowRequest
 from app.services import ollama_client
@@ -50,9 +51,10 @@ def _format_relative(date_str: str) -> str:
 @router.post("/chat")
 async def chat(body: ChatRequest, request: Request, user: dict = Depends(get_api_key_user)):
     reset_daily_if_needed(user["id"])
+    model = body.model or settings.DEFAULT_MODEL
 
     payload = {
-        "model": body.model,
+        "model": model,
         "messages": [m.model_dump() for m in body.messages],
         "stream": False,
     }
@@ -63,7 +65,7 @@ async def chat(body: ChatRequest, request: Request, user: dict = Depends(get_api
     try:
         result = await ollama_client.chat(payload)
     except Exception as e:
-        _log_usage(user, body.model, "/api/v1/chat", 0, 0, time.time() - start, 502, request, True)
+        _log_usage(user, model, "/api/v1/chat", 0, 0, time.time() - start, 502, request, True)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ollama error: {e}")
 
     prompt_tokens = result.get("prompt_eval_count", 0) or 0
@@ -76,7 +78,7 @@ async def chat(body: ChatRequest, request: Request, user: dict = Depends(get_api
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
 
-    _log_usage(user, body.model, "/api/v1/chat", prompt_tokens, completion_tokens, elapsed, 200, request, False)
+    _log_usage(user, model, "/api/v1/chat", prompt_tokens, completion_tokens, elapsed, 200, request, False)
 
     return result
 
@@ -143,9 +145,10 @@ def _log_usage(
 async def openai_chat_completions(body: ChatRequest, request: Request, user: dict = Depends(get_api_key_user)):
     """OpenAI-compatible chat completions endpoint."""
     reset_daily_if_needed(user["id"])
+    model = body.model or settings.DEFAULT_MODEL
 
     payload = {
-        "model": body.model,
+        "model": model,
         "messages": [m.model_dump() for m in body.messages],
         "stream": False,
     }
@@ -156,7 +159,7 @@ async def openai_chat_completions(body: ChatRequest, request: Request, user: dic
     try:
         result = await ollama_client.chat(payload)
     except Exception as e:
-        _log_usage(user, body.model, "/v1/chat/completions", 0, 0, time.time() - start, 502, request, True)
+        _log_usage(user, model, "/v1/chat/completions", 0, 0, time.time() - start, 502, request, True)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ollama error: {e}")
 
     prompt_tokens = result.get("prompt_eval_count", 0) or 0
@@ -169,7 +172,7 @@ async def openai_chat_completions(body: ChatRequest, request: Request, user: dic
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
 
-    _log_usage(user, body.model, "/v1/chat/completions", prompt_tokens, completion_tokens, elapsed, 200, request, False)
+    _log_usage(user, model, "/v1/chat/completions", prompt_tokens, completion_tokens, elapsed, 200, request, False)
 
     # Return OpenAI-compatible response format
     msg = result.get("message", {})
@@ -177,7 +180,7 @@ async def openai_chat_completions(body: ChatRequest, request: Request, user: dic
         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
         "object": "chat.completion",
         "created": int(time.time()),
-        "model": body.model,
+        "model": model,
         "choices": [
             {
                 "index": 0,
@@ -232,9 +235,10 @@ async def ollama_tags(user: dict = Depends(get_api_key_user)):
 async def ollama_native_chat(body: ChatRequest, request: Request, user: dict = Depends(get_api_key_user)):
     """Ollama-native /api/chat endpoint for n8n compatibility."""
     reset_daily_if_needed(user["id"])
+    model = body.model or settings.DEFAULT_MODEL
 
     payload = {
-        "model": body.model,
+        "model": model,
         "messages": [m.model_dump() for m in body.messages],
         "stream": False,
     }
@@ -245,7 +249,7 @@ async def ollama_native_chat(body: ChatRequest, request: Request, user: dict = D
     try:
         result = await ollama_client.chat(payload)
     except Exception as e:
-        _log_usage(user, body.model, "/api/chat", 0, 0, time.time() - start, 502, request, True)
+        _log_usage(user, model, "/api/chat", 0, 0, time.time() - start, 502, request, True)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Ollama error: {e}")
 
     prompt_tokens = result.get("prompt_eval_count", 0) or 0
@@ -258,7 +262,7 @@ async def ollama_native_chat(body: ChatRequest, request: Request, user: dict = D
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
 
-    _log_usage(user, body.model, "/api/chat", prompt_tokens, completion_tokens, elapsed, 200, request, False)
+    _log_usage(user, model, "/api/chat", prompt_tokens, completion_tokens, elapsed, 200, request, False)
 
     return result
 

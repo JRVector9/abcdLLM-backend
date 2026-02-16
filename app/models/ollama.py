@@ -8,7 +8,7 @@ class MessageSchema(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    model: str
+    model: Optional[str] = None
     messages: list[MessageSchema]
     stream: bool = False
     options: Optional[dict] = None

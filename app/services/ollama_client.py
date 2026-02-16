@@ -42,6 +42,8 @@ def reset_client() -> None:
 
 
 async def chat(payload: dict) -> dict:
+    if "keep_alive" not in payload:
+        payload["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
     client = get_client()
     resp = await client.post("/api/chat", json=payload)
     resp.raise_for_status()
@@ -56,6 +58,8 @@ async def list_models() -> dict:
 
 
 async def generate(payload: dict) -> dict:
+    if "keep_alive" not in payload:
+        payload["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
     client = get_client()
     resp = await client.post("/api/generate", json=payload)
     resp.raise_for_status()
