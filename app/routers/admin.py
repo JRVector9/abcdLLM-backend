@@ -158,6 +158,51 @@ async def admin_insights(body: InsightsRequest, admin: dict = Depends(require_ad
         return {"insights": "Unable to generate insights. Ensure Ollama is running."}
 
 
+@router.get("/keys")
+async def list_all_keys(admin: dict = Depends(require_admin)):
+    """관리자용: 전체 API 키 목록 조회"""
+    results = pb.collection("api_keys").get_list(1, 200, {"sort": "-created"})
+    keys = []
+    for r in results.items:
+        # 키 소유자 이메일 조회
+        owner_email = ""
+        try:
+            owner = pb.collection("users").get_one(r.user)
+            owner_email = getattr(owner, "email", "")
+        except Exception:
+            pass
+        keys.append({
+            "id": r.id,
+            "name": getattr(r, "name", ""),
+            "user": r.user,
+            "userEmail": owner_email,
+            "dailyRequests": getattr(r, "daily_requests", 0) or 0,
+            "dailyTokens": getattr(r, "daily_tokens", 0) or 0,
+            "totalTokens": getattr(r, "total_tokens", 0) or 0,
+            "usedRequests": getattr(r, "used_requests", 0) or 0,
+            "usedTokens": getattr(r, "used_tokens", 0) or 0,
+            "totalUsedTokens": getattr(r, "total_used_tokens", 0) or 0,
+        })
+    return keys
+
+
+@router.patch("/keys/{key_id}")
+async def admin_update_key(key_id: str, body: dict, admin: dict = Depends(require_admin)):
+    """관리자용: 임의 키의 한도 수정"""
+    field_map = {"dailyRequests": "daily_requests", "dailyTokens": "daily_tokens", "totalTokens": "total_tokens"}
+    update_data = {}
+    for k, v in body.items():
+        if k in field_map and isinstance(v, (int, float)):
+            update_data[field_map[k]] = int(v)
+    if not update_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update")
+    try:
+        pb.collection("api_keys").update(key_id, update_data)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
 @router.get("/applications")
 async def list_all_applications(admin: dict = Depends(require_admin)):
     results = pb.collection("api_applications").get_list(1, 200, {"sort": "-created"})

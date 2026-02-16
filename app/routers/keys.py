@@ -99,6 +99,30 @@ async def reveal_key(key_id: str, user: dict = Depends(get_current_user)):
     return {"key": stored_key}
 
 
+@router.patch("/{key_id}")
+async def update_key_limits(key_id: str, body: dict, user: dict = Depends(get_current_user)):
+    try:
+        record = pb.collection("api_keys").get_one(key_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Key not found")
+    if record.user != user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your key")
+
+    allowed = {"dailyRequests", "dailyTokens", "totalTokens"}
+    update_data = {}
+    field_map = {"dailyRequests": "daily_requests", "dailyTokens": "daily_tokens", "totalTokens": "total_tokens"}
+    for k, v in body.items():
+        if k in allowed and isinstance(v, (int, float)):
+            update_data[field_map[k]] = int(v)
+
+    if not update_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update")
+
+    pb.collection("api_keys").update(key_id, update_data)
+    updated = pb.collection("api_keys").get_one(key_id)
+    return _key_to_response(updated)
+
+
 @router.post("/{key_id}/regenerate")
 async def regenerate_key(key_id: str, user: dict = Depends(get_current_user)):
     try:
