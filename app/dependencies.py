@@ -1,16 +1,27 @@
 import hashlib
+import logging
 from datetime import datetime
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
+from pocketbase.utils import ClientResponseError
 
 from app.config import settings
 from app.database import pb
 
+logger = logging.getLogger(__name__)
+
 security = HTTPBearer()
 
 API_KEY_PREFIX = "sk-abcd-"
+
+
+def _is_connection_error(exc: Exception) -> bool:
+    """PocketBase 연결 에러인지 판별 (인증 에러와 구분)."""
+    err_str = str(exc).lower()
+    connection_keywords = ["connection refused", "connect", "timeout", "unreachable", "network"]
+    return any(kw in err_str for kw in connection_keywords)
 
 
 def _decode_jwt(token: str) -> dict:
@@ -34,7 +45,15 @@ async def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
     try:
         record = pb.collection("users").get_one(user_id)
-    except Exception:
+    except ClientResponseError as e:
+        if e.status == 404:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        logger.error(f"PocketBase error fetching user {user_id}: {e}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Database temporarily unavailable")
+    except Exception as e:
+        if _is_connection_error(e):
+            logger.error(f"PocketBase connection error: {e}")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Database temporarily unavailable")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return _record_to_dict(record)
 
@@ -59,7 +78,10 @@ async def get_api_key_user(
             return {**_record_to_dict(user_record), "_api_key_id": key_record.id}
         except HTTPException:
             raise
-        except Exception:
+        except Exception as e:
+            if _is_connection_error(e):
+                logger.error(f"PocketBase connection error (API key auth): {e}")
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Database temporarily unavailable")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
     else:
         return await get_current_user(credentials)
