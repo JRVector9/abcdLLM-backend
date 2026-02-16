@@ -27,9 +27,15 @@ def _key_to_response(record, plain_key: str | None = None) -> dict:
         "name": getattr(record, "name", ""),
         "key": plain_key or stored_key or (prefix + "..."),
         "createdAt": str(created),
+        # Limits
         "dailyRequests": getattr(record, "daily_requests", 0) or 0,
         "dailyTokens": getattr(record, "daily_tokens", 0) or 0,
         "totalTokens": getattr(record, "total_tokens", 0) or 0,
+        # Actual usage
+        "usedRequests": getattr(record, "used_requests", 0) or 0,
+        "usedTokens": getattr(record, "used_tokens", 0) or 0,
+        "totalUsedTokens": getattr(record, "total_used_tokens", 0) or 0,
+        "lastResetDate": str(getattr(record, "last_reset_date", "") or ""),
     }
 
 
