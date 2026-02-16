@@ -45,8 +45,17 @@ async def list_keys(user: dict = Depends(get_current_user)):
     return [_key_to_response(r) for r in results.items]
 
 
+MAX_KEYS_PER_USER = 1
+
+
 @router.post("")
 async def create_key(body: ApiKeyCreateRequest, user: dict = Depends(get_current_user)):
+    existing = pb.collection("api_keys").get_list(1, 1, {"filter": f'user="{user["id"]}"'})
+    if existing.total_items >= MAX_KEYS_PER_USER:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"API 키는 최대 {MAX_KEYS_PER_USER}개까지 생성할 수 있습니다",
+        )
     plain_key = _generate_api_key()
     key_hash = hashlib.sha256(plain_key.encode()).hexdigest()
 

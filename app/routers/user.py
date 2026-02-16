@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from app.database import pb
 from app.dependencies import get_current_user
 from app.services import ollama_client
+from app.services import metrics_service
 
 router = APIRouter()
 
@@ -53,11 +54,20 @@ async def dashboard(user: dict = Depends(get_current_user)):
     except Exception:
         pass
 
+    # Backend uptime
+    uptime_str = ""
+    try:
+        metrics = metrics_service.get_system_metrics()
+        uptime_str = metrics.get("uptime", "")
+    except Exception:
+        pass
+
     return {
         "user": user,
         "recentUsage": recent_usage,
         "activeModels": active_models,
         "totalRequests": total_requests,
+        "uptime": uptime_str,
     }
 
 
