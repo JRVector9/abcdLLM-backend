@@ -69,6 +69,14 @@ async def show_model(name: str) -> dict:
     return resp.json()
 
 
+async def pull_model(name: str) -> dict:
+    client = get_client()
+    # stream=false returns once when pull is completed
+    resp = await client.post("/api/pull", json={"name": name, "stream": False})
+    resp.raise_for_status()
+    return resp.json()
+
+
 async def health_check() -> bool:
     try:
         client = get_client()

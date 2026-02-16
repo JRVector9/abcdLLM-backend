@@ -4,7 +4,12 @@ from app.database import pb
 from app.dependencies import require_admin, _record_to_dict
 from app.models.user import UserUpdateRequest
 from app.models.application import ApplicationUpdateRequest
-from app.models.admin import InsightsRequest, OllamaSettingsResponse, OllamaSettingsUpdateRequest
+from app.models.admin import (
+    InsightsRequest,
+    OllamaPullRequest,
+    OllamaSettingsResponse,
+    OllamaSettingsUpdateRequest,
+)
 from app.services import metrics_service, security_service, ollama_client
 from app.config import settings
 
@@ -235,3 +240,19 @@ async def update_ollama_settings(
     # 클라이언트 재생성을 위해 기존 클라이언트 닫기
     ollama_client.reset_client()
     return OllamaSettingsResponse(ollamaBaseUrl=body.ollamaBaseUrl)
+
+
+@router.post("/models/pull")
+async def pull_ollama_model(
+    body: OllamaPullRequest, admin: dict = Depends(require_admin)
+):
+    """관리자용: Ollama에 새 모델 pull"""
+    model_name = (body.name or "").strip()
+    if not model_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Model name is required")
+
+    try:
+        result = await ollama_client.pull_model(model_name)
+        return {"ok": True, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to pull model: {e}")

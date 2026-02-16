@@ -39,3 +39,7 @@ class OllamaSettingsResponse(BaseModel):
 
 class OllamaSettingsUpdateRequest(BaseModel):
     ollamaBaseUrl: str
+
+
+class OllamaPullRequest(BaseModel):
+    name: str
