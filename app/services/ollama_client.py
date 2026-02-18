@@ -29,7 +29,10 @@ def get_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
         base_url = _get_ollama_base_url()
-        _client = httpx.AsyncClient(base_url=base_url, timeout=120.0)
+        _client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=10.0),
+        )
     return _client
 
 
@@ -59,19 +62,32 @@ async def chat(payload: dict) -> dict:
 
 
 async def chat_stream(payload: dict):
-    """Ollama /api/chat를 NDJSON 스트리밍으로 반환하는 async generator"""
+    """Ollama /api/chat를 NDJSON 스트리밍으로 반환하는 async generator.
+    기존 persistent client를 재사용해 TCP 연결 오버헤드 제거."""
     if "keep_alive" not in payload:
         payload["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
-    base_url = _get_ollama_base_url()
-    async with httpx.AsyncClient(
-        base_url=base_url,
-        timeout=httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0),
-    ) as client:
-        async with client.stream("POST", "/api/chat", json=payload) as resp:
-            resp.raise_for_status()
-            async for chunk in resp.aiter_bytes():
-                if chunk:
-                    yield chunk
+    client = get_client()  # persistent client 재사용
+    async with client.stream("POST", "/api/chat", json=payload) as resp:
+        resp.raise_for_status()
+        async for chunk in resp.aiter_bytes():
+            if chunk:
+                yield chunk
+
+
+async def warmup(model: str | None = None) -> None:
+    """서버 시작 시 기본 모델을 VRAM에 미리 로드. 첫 요청 콜드 스타트 제거."""
+    target = model or settings.DEFAULT_MODEL
+    try:
+        client = get_client()
+        await client.post("/api/chat", json={
+            "model": target,
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+            "think": False,
+            "keep_alive": settings.OLLAMA_KEEP_ALIVE,
+        })
+    except Exception:
+        pass  # 워밍 실패해도 서버 시작은 계속
 
 
 async def list_models() -> dict:

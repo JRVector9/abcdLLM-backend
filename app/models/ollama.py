@@ -12,6 +12,7 @@ class ChatRequest(BaseModel):
     messages: list[MessageSchema]
     stream: bool = False
     options: Optional[dict] = None
+    think: Optional[bool] = None  # None = 모델 기본값, False = thinking 비활성화(빠름)
 
 
 class ChatResponse(BaseModel):

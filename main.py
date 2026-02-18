@@ -17,6 +17,11 @@ async def lifespan(app: FastAPI):
     from app.services.ollama_detector import auto_configure_ollama
     await auto_configure_ollama()
 
+    # Startup: 기본 모델 VRAM 워밍업 (첫 요청 콜드 스타트 제거)
+    import asyncio
+    from app.services.ollama_client import warmup
+    asyncio.create_task(warmup())
+
     yield
 
     # Shutdown: 필요한 경우 정리 작업

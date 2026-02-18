@@ -64,6 +64,8 @@ async def chat(body: ChatRequest, request: Request, user: dict = Depends(get_api
         }
         if body.options:
             payload["options"] = body.options
+        if body.think is not None:
+            payload["think"] = body.think
 
         start = time.time()
         token_state = {"prompt": 0, "completion": 0}
@@ -104,6 +106,8 @@ async def chat(body: ChatRequest, request: Request, user: dict = Depends(get_api
     }
     if body.options:
         payload["options"] = body.options
+    if body.think is not None:
+        payload["think"] = body.think
 
     start = time.time()
     try:
