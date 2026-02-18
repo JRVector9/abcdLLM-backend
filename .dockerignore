@@ -1,3 +1,4 @@
+.env
 __pycache__
 .git
 pb_data
