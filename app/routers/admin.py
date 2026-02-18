@@ -60,21 +60,18 @@ async def security_events(admin: dict = Depends(require_admin)):
 async def system_metrics(admin: dict = Depends(require_admin)):
     base = metrics_service.get_system_metrics()
 
-    # Add request-level metrics from usage_logs
+    # Add request-level metrics from usage_logs — 쿼리 3개 → 1개로 통합
     active_requests = 0
     error_rate = 0.0
     avg_response_time = 0.0
     try:
-        total = pb.collection("usage_logs").get_list(1, 1)
-        total_count = total.total_items
-        if total_count > 0:
-            errors = pb.collection("usage_logs").get_list(1, 1, {"filter": 'isError=true'})
-            error_rate = round((errors.total_items / total_count) * 100, 1)
-
-            recent = pb.collection("usage_logs").get_list(1, 100, {"sort": "-created"})
-            if recent.items:
-                total_rt = sum(getattr(r, "response_time_ms", 0) or 0 for r in recent.items)
-                avg_response_time = round(total_rt / len(recent.items), 1)
+        recent = pb.collection("usage_logs").get_list(1, 100, {"sort": "-created"})
+        total_count = recent.total_items
+        if total_count > 0 and recent.items:
+            error_count = sum(1 for r in recent.items if getattr(r, "is_error", False) or getattr(r, "isError", False))
+            error_rate = round((error_count / len(recent.items)) * 100, 1)
+            total_rt = sum(getattr(r, "response_time_ms", 0) or 0 for r in recent.items)
+            avg_response_time = round(total_rt / len(recent.items), 1)
     except Exception:
         pass
 
@@ -94,41 +91,41 @@ async def model_performance(admin: dict = Depends(require_admin)):
         data = await ollama_client.list_models()
         models = data.get("models", [])
 
+        # N+1 제거: 모든 모델 로그를 쿼리 1번으로 가져와 메모리에서 집계
+        all_logs = pb.collection("usage_logs").get_list(
+            1, 500, {"sort": "-created"}
+        )
+        # 모델별 로그 분류
+        logs_by_model: dict[str, list] = {}
+        for r in all_logs.items:
+            m_name = getattr(r, "model", "") or ""
+            if m_name not in logs_by_model:
+                logs_by_model[m_name] = []
+            logs_by_model[m_name].append(r)
+
         for m in models:
             name = m.get("name", "")
-            try:
-                logs = pb.collection("usage_logs").get_list(
-                    1, 100, {"filter": f'model="{name}"', "sort": "-created"}
-                )
-                items = logs.items
-                total_tokens = sum((getattr(r, "total_tokens", 0) or 0) for r in items)
-                total_time = sum((getattr(r, "response_time_ms", 0) or 0) for r in items)
-                error_count = sum(1 for r in items if getattr(r, "is_error", False))
-                count = len(items)
+            items = logs_by_model.get(name, [])
+            total_tokens = sum((getattr(r, "total_tokens", 0) or 0) for r in items)
+            total_time = sum((getattr(r, "response_time_ms", 0) or 0) for r in items)
+            error_count = sum(1 for r in items if getattr(r, "is_error", False) or getattr(r, "isError", False))
+            count = len(items)
 
-                tokens_per_sec = round(total_tokens / (total_time / 1000), 1) if total_time > 0 else 0
-                avg_latency = round(total_time / count, 1) if count > 0 else 0
-                err_rate = round((error_count / count) * 100, 1) if count > 0 else 0
+            tokens_per_sec = round(total_tokens / (total_time / 1000), 1) if total_time > 0 else 0
+            avg_latency = round(total_time / count, 1) if count > 0 else 0
+            err_rate = round((error_count / count) * 100, 1) if count > 0 else 0
 
-                size_bytes = m.get("size", 0)
-                gb = size_bytes / (1024 ** 3)
-                mem_str = f"{gb:.1f}GB" if gb >= 1 else f"{size_bytes / (1024**2):.0f}MB"
+            size_bytes = m.get("size", 0)
+            gb = size_bytes / (1024 ** 3)
+            mem_str = f"{gb:.1f}GB" if gb >= 1 else f"{size_bytes / (1024**2):.0f}MB"
 
-                performance.append({
-                    "name": name,
-                    "tokensPerSec": tokens_per_sec,
-                    "avgLatency": avg_latency,
-                    "memoryUsage": mem_str,
-                    "errorRate": err_rate,
-                })
-            except Exception:
-                performance.append({
-                    "name": name,
-                    "tokensPerSec": 0,
-                    "avgLatency": 0,
-                    "memoryUsage": "Unknown",
-                    "errorRate": 0,
-                })
+            performance.append({
+                "name": name,
+                "tokensPerSec": tokens_per_sec,
+                "avgLatency": avg_latency,
+                "memoryUsage": mem_str,
+                "errorRate": err_rate,
+            })
     except Exception:
         pass
 
@@ -162,15 +159,12 @@ async def admin_insights(body: InsightsRequest, admin: dict = Depends(require_ad
 async def list_all_keys(admin: dict = Depends(require_admin)):
     """관리자용: 전체 API 키 목록 조회"""
     results = pb.collection("api_keys").get_list(1, 200, {"sort": "-created"})
+    # N+1 제거: 유저 목록 1번 조회 후 메모리에서 매핑
+    users_result = pb.collection("users").get_list(1, 200)
+    user_email_map = {u.id: getattr(u, "email", "") for u in users_result.items}
     keys = []
     for r in results.items:
-        # 키 소유자 이메일 조회
-        owner_email = ""
-        try:
-            owner = pb.collection("users").get_one(r.user)
-            owner_email = getattr(owner, "email", "")
-        except Exception:
-            pass
+        owner_email = user_email_map.get(r.user, "")
         keys.append({
             "id": r.id,
             "name": getattr(r, "name", ""),

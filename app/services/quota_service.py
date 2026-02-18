@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from app.database import pb
+from app.services import cache
 
 
 def _today() -> str:
@@ -8,33 +9,36 @@ def _today() -> str:
 
 
 def check_and_deduct(user: dict, tokens_used: int, api_key_id: str | None = None) -> None:
-    """Check quota and deduct tokens. Raises ValueError if over quota."""
-    user_id = user["id"]
-    record = pb.collection("users").get_one(user_id)
+    """Check quota and deduct tokens. Raises ValueError if over quota.
 
-    # camelCase/snake_case 호환
-    daily_usage = getattr(record, "dailyUsage", None) or getattr(record, "daily_usage", None) or 0
-    daily_quota = getattr(record, "dailyQuota", None) or getattr(record, "daily_quota", None) or 5000
-    total_usage = getattr(record, "totalUsage", None) or getattr(record, "total_usage", None) or 0
-    total_quota = getattr(record, "totalQuota", None) or getattr(record, "total_quota", None) or 50000
+    user dict에 이미 quota 정보가 있으므로 DB 재조회 없이 사용.
+    write 후 캐시 무효화.
+    """
+    user_id = user["id"]
+    daily_usage = user.get("dailyUsage", 0) or 0
+    daily_quota = user.get("dailyQuota", 5000) or 5000
+    total_usage = user.get("usage", 0) or 0
+    total_quota = user.get("totalQuota", 50000) or 50000
 
     if daily_usage + tokens_used > daily_quota:
         raise ValueError(f"Daily quota exceeded ({daily_usage}/{daily_quota})")
     if total_usage + tokens_used > total_quota:
         raise ValueError(f"Total quota exceeded ({total_usage}/{total_quota})")
 
-    # 사용량 업데이트 + lastActive 추가 (일일 리셋용)
+    # DB 업데이트
     pb.collection("users").update(user_id, {
         "dailyUsage": daily_usage + tokens_used,
         "totalUsage": total_usage + tokens_used,
         "lastActive": datetime.now(timezone.utc).isoformat(),
     })
 
-    # Update API key usage if applicable
+    # 캐시 무효화 (다음 요청에서 신선한 데이터 사용)
+    cache.invalidate_user(user_id)
+
+    # API Key usage 업데이트
     if api_key_id:
         try:
             key_record = pb.collection("api_keys").get_one(api_key_id)
-            # camelCase/snake_case 호환
             last_reset = str(getattr(key_record, "lastResetDate", "") or getattr(key_record, "last_reset_date", "") or "")
             today = _today()
             used_requests = getattr(key_record, "usedRequests", None) or getattr(key_record, "used_requests", None) or 0
@@ -56,12 +60,19 @@ def check_and_deduct(user: dict, tokens_used: int, api_key_id: str | None = None
 
 
 def reset_daily_if_needed(user_id: str) -> None:
-    """Reset daily usage if it's a new day. Called at request time."""
+    """Reset daily usage if it's a new day. Called at request time.
+
+    Redis 캐시로 같은 날 중복 체크 방지.
+    """
+    today = _today()
+
+    # 오늘 이미 체크했으면 스킵
+    if cache.is_daily_reset_done(user_id, today):
+        return
+
     try:
         record = pb.collection("users").get_one(user_id)
-        # camelCase/snake_case 호환
         last_active = getattr(record, "lastActive", "") or getattr(record, "last_active", "") or ""
-        today = _today()
 
         if last_active:
             last_date = str(last_active)[:10]
@@ -70,10 +81,14 @@ def reset_daily_if_needed(user_id: str) -> None:
                     "dailyUsage": 0,
                     "lastActive": datetime.now(timezone.utc).isoformat(),
                 })
+                cache.invalidate_user(user_id)
         else:
-            # lastActive가 없으면 초기화
             pb.collection("users").update(user_id, {
                 "lastActive": datetime.now(timezone.utc).isoformat(),
             })
+            cache.invalidate_user(user_id)
+
+        # 오늘 체크 완료 표시 (자정까지 캐시)
+        cache.mark_daily_reset_done(user_id, today)
     except Exception:
         pass
