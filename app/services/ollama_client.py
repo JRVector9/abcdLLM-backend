@@ -50,6 +50,22 @@ async def chat(payload: dict) -> dict:
     return resp.json()
 
 
+async def chat_stream(payload: dict):
+    """Ollama /api/chat를 NDJSON 스트리밍으로 반환하는 async generator"""
+    if "keep_alive" not in payload:
+        payload["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
+    base_url = _get_ollama_base_url()
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        timeout=httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0),
+    ) as client:
+        async with client.stream("POST", "/api/chat", json=payload) as resp:
+            resp.raise_for_status()
+            async for chunk in resp.aiter_bytes():
+                if chunk:
+                    yield chunk
+
+
 async def list_models() -> dict:
     client = get_client()
     resp = await client.get("/api/tags")

@@ -1,8 +1,10 @@
+import json
 import time
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.dependencies import get_api_key_user
@@ -53,6 +55,48 @@ async def chat(body: ChatRequest, request: Request, user: dict = Depends(get_api
     reset_daily_if_needed(user["id"])
     model = body.model or settings.DEFAULT_MODEL
 
+    # 스트리밍 요청 처리
+    if body.stream:
+        payload = {
+            "model": model,
+            "messages": [m.model_dump() for m in body.messages],
+            "stream": True,
+        }
+        if body.options:
+            payload["options"] = body.options
+
+        start = time.time()
+        token_state = {"prompt": 0, "completion": 0}
+
+        async def generate():
+            try:
+                async for chunk in ollama_client.chat_stream(payload):
+                    yield chunk
+                    try:
+                        data = json.loads(chunk)
+                        if data.get("done"):
+                            token_state["prompt"] = data.get("prompt_eval_count", 0) or 0
+                            token_state["completion"] = data.get("eval_count", 0) or 0
+                    except Exception:
+                        pass
+            except Exception as e:
+                yield (json.dumps({"error": str(e)}) + "\n").encode()
+            finally:
+                total = token_state["prompt"] + token_state["completion"]
+                elapsed = time.time() - start
+                try:
+                    check_and_deduct(user, total, user.get("_api_key_id"))
+                except ValueError:
+                    pass
+                _log_usage(user, model, "/api/v1/chat", token_state["prompt"], token_state["completion"], elapsed, 200, request, False)
+
+        return StreamingResponse(
+            generate(),
+            media_type="application/x-ndjson",
+            headers={"X-Accel-Buffering": "no"},
+        )
+
+    # 일반(비스트리밍) 처리
     payload = {
         "model": model,
         "messages": [m.model_dump() for m in body.messages],
