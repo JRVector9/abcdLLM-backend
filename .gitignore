@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 pb_data/
 .claude/settings.local.json
+setup_prod.py
