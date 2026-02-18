@@ -6,12 +6,20 @@ _client: httpx.AsyncClient | None = None
 
 
 def _get_ollama_base_url() -> str:
-    """DB에서 Ollama URL을 가져옵니다. 없으면 config 기본값 사용"""
+    """DB에서 Ollama URL을 가져옵니다. Redis 캐시 우선, 없으면 config 기본값 사용"""
+    from app.services import cache
+
+    cached = cache.get_cached_ollama_url()
+    if cached:
+        return cached
+
     try:
         from app.database import pb
         results = pb.collection("system_settings").get_list(1, 1, {"filter": 'key="ollama_base_url"'})
         if results.items:
-            return getattr(results.items[0], "value", settings.OLLAMA_BASE_URL)
+            url = getattr(results.items[0], "value", settings.OLLAMA_BASE_URL)
+            cache.set_cached_ollama_url(url)
+            return url
     except Exception:
         pass
     return settings.OLLAMA_BASE_URL

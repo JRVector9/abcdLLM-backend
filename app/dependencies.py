@@ -8,6 +8,7 @@ from pocketbase.utils import ClientResponseError
 
 from app.config import settings
 from app.database import pb
+from app.services import cache
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,12 @@ async def get_current_user(
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+
+    # 캐시 히트 → DB 스킵
+    cached = cache.get_cached_jwt_user(user_id)
+    if cached:
+        return cached
+
     try:
         record = pb.collection("users").get_one(user_id)
     except ClientResponseError as e:
@@ -43,10 +50,12 @@ async def get_current_user(
         logger.error(f"PocketBase error fetching user {user_id}: {e}")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Database temporarily unavailable")
     except Exception as e:
-        # JWT는 이미 검증됨 → PocketBase 접근 실패는 모두 DB 장애로 처리
         logger.error(f"PocketBase error fetching user {user_id}: {type(e).__name__}: {e}")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Database temporarily unavailable")
-    return _record_to_dict(record)
+
+    user = _record_to_dict(record)
+    cache.set_cached_jwt_user(user_id, user)
+    return user
 
 
 async def get_api_key_user(
@@ -57,6 +66,12 @@ async def get_api_key_user(
 
     if token.startswith(API_KEY_PREFIX):
         key_hash = hashlib.sha256(token.encode()).hexdigest()
+
+        # 캐시 히트 → DB 2번 스킵
+        cached = cache.get_cached_apikey_user(key_hash)
+        if cached:
+            return cached
+
         try:
             results = pb.collection("api_keys").get_list(1, 1, {"filter": f'keyHash="{key_hash}" && isActive=true'})
             if not results.items:
@@ -66,11 +81,12 @@ async def get_api_key_user(
             user_status = getattr(user_record, "status", "active")
             if user_status == "blocked":
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account blocked")
-            return {**_record_to_dict(user_record), "_api_key_id": key_record.id}
+            user = {**_record_to_dict(user_record), "_api_key_id": key_record.id}
+            cache.set_cached_apikey_user(key_hash, user)
+            return user
         except HTTPException:
             raise
         except Exception as e:
-            # API 키 해시는 이미 계산됨 → PocketBase 접근 실패는 모두 DB 장애로 처리
             logger.error(f"PocketBase error (API key auth): {type(e).__name__}: {e}")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Database temporarily unavailable")
     else:
