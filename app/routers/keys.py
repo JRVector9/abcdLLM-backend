@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.database import pb
 from app.dependencies import get_current_user, API_KEY_PREFIX
 from app.models.api_key import ApiKeyCreateRequest
+from app.services import cache
 
 router = APIRouter()
 
@@ -41,8 +42,15 @@ def _key_to_response(record, plain_key: str | None = None) -> dict:
 
 @router.get("")
 async def list_keys(user: dict = Depends(get_current_user)):
+    # Redis 캐시 히트 → DB 스킵
+    cached = cache.get_cached_key_list(user["id"])
+    if cached is not None:
+        return cached
+
     results = pb.collection("api_keys").get_list(1, 50, {"filter": f'user="{user["id"]}"'})
-    return [_key_to_response(r) for r in results.items]
+    keys = [_key_to_response(r) for r in results.items]
+    cache.set_cached_key_list(user["id"], keys)
+    return keys
 
 
 MAX_KEYS_PER_USER = 1
@@ -74,6 +82,7 @@ async def create_key(body: ApiKeyCreateRequest, user: dict = Depends(get_current
         "lastResetDate": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         "isActive": True,
     })
+    cache.invalidate_key_list(user["id"])  # 목록 캐시 무효화
     return _key_to_response(record, plain_key)
 
 
@@ -86,11 +95,18 @@ async def delete_key(key_id: str, user: dict = Depends(get_current_user)):
     if record.user != user["id"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your key")
     pb.collection("api_keys").delete(key_id)
+    cache.invalidate_key_list(user["id"])   # 목록 캐시 무효화
+    cache.invalidate_reveal(key_id)         # reveal 캐시 무효화
     return {"ok": True}
 
 
 @router.get("/{key_id}/reveal")
 async def reveal_key(key_id: str, user: dict = Depends(get_current_user)):
+    # Redis 캐시 히트 → DB 스킵 (키 내용은 재발급 전까지 불변)
+    cached_key = cache.get_cached_reveal(key_id)
+    if cached_key:
+        return {"key": cached_key}
+
     try:
         record = pb.collection("api_keys").get_one(key_id)
     except Exception:
@@ -98,13 +114,13 @@ async def reveal_key(key_id: str, user: dict = Depends(get_current_user)):
     if record.user != user["id"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your key")
 
-    # Return the full key from storage (try both camelCase and snake_case)
     stored_key = getattr(record, "keyPlain", None) or getattr(record, "key_plain", None) or ""
     if not stored_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Full key not available (created before keyPlain storage)"
         )
+    cache.set_cached_reveal(key_id, stored_key)  # 10분 캐시
     return {"key": stored_key}
 
 
@@ -127,8 +143,8 @@ async def update_key_limits(key_id: str, body: dict, user: dict = Depends(get_cu
     if not update_data:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update")
 
-    pb.collection("api_keys").update(key_id, update_data)
-    updated = pb.collection("api_keys").get_one(key_id)
+    updated = pb.collection("api_keys").update(key_id, update_data)  # update()가 레코드 반환
+    cache.invalidate_key_list(user["id"])
     return _key_to_response(updated)
 
 
@@ -144,10 +160,11 @@ async def regenerate_key(key_id: str, user: dict = Depends(get_current_user)):
     plain_key = _generate_api_key()
     key_hash = hashlib.sha256(plain_key.encode()).hexdigest()
 
-    pb.collection("api_keys").update(key_id, {
+    updated = pb.collection("api_keys").update(key_id, {
         "keyHash": key_hash,
         "keyPrefix": plain_key[:12],
         "keyPlain": plain_key,
     })
-    updated = pb.collection("api_keys").get_one(key_id)
+    cache.invalidate_key_list(user["id"])
+    cache.invalidate_reveal(key_id)  # 재발급 → 기존 reveal 캐시 무효화
     return _key_to_response(updated, plain_key)

@@ -145,3 +145,38 @@ def get_cached_ollama_url() -> str | None:
 
 def set_cached_ollama_url(url: str) -> None:
     set(key_ollama_url(), url, ttl=600)  # 10분
+
+
+# ── API Keys 캐시 ─────────────────────────────────────────────────
+
+def key_list(user_id: str) -> str:
+    return f"keys:list:{user_id}"
+
+
+def key_reveal(key_id: str) -> str:
+    return f"keys:reveal:{key_id}"
+
+
+def get_cached_key_list(user_id: str) -> list | None:
+    return get(key_list(user_id))
+
+
+def set_cached_key_list(user_id: str, keys: list) -> None:
+    set(key_list(user_id), keys, ttl=30)  # 30초 (사용량이 실시간 변하므로 짧게)
+
+
+def invalidate_key_list(user_id: str) -> None:
+    delete(key_list(user_id))
+
+
+def get_cached_reveal(key_id: str) -> str | None:
+    val = get(key_reveal(key_id))
+    return str(val) if val else None
+
+
+def set_cached_reveal(key_id: str, plain_key: str) -> None:
+    set(key_reveal(key_id), plain_key, ttl=600)  # 10분 (재발급 전까지 불변)
+
+
+def invalidate_reveal(key_id: str) -> None:
+    delete(key_reveal(key_id))
